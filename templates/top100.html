@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Top 100 Filmes</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    table, th, td { border: 1px solid #aaa; }
+    th, td { padding: 8px; text-align: left; }
+    tr:nth-child(even) { background-color: #f2f2f2; }
+    .error { color: red; }
+    a { text-decoration: none; color: blue; }
+  </style>
+</head>
+<body>
+  <h1>Top 100 Filmes por Nota IMDb</h1>
+  <!-- Link para retornar à página inicial -->
+  <p><a href="/">Voltar para a Busca de Filmes</a></p>
+  <form id="top100Form">
+    <label for="genreInput">Filtrar por Gênero (opcional):</label>
+    <input type="text" id="genreInput" name="genre" placeholder="ex.: Drama">
+    <br><br>
+    <label for="orderSelect">Ordenar por:</label>
+    <select id="orderSelect">
+      <option value="score">Nota IMDb</option>
+      <option value="year">Ano de Lançamento</option>
+    </select>
+    <br><br>
+    <button type="submit">Buscar</button>
+  </form>
+  
+  <div id="result"></div>
+
+  <script>
+    const form = document.getElementById('top100Form');
+    const resultDiv = document.getElementById('result');
+
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      const genre = document.getElementById('genreInput').value;
+      const order = document.getElementById('orderSelect').value;
+      fetch(`/api/top100?genre=${encodeURIComponent(genre)}&order=${encodeURIComponent(order)}`)
+        .then(response => response.json())
+        .then(data => {
+          displayResult(data);
+        })
+        .catch(err => {
+          console.error(err);
+          resultDiv.innerHTML = "<p class='error'>Ocorreu um erro ao buscar os filmes.</p>";
+        });
+    });
+
+    function displayResult(data) {
+      resultDiv.innerHTML = "";
+      if(data.error) {
+        resultDiv.innerHTML = `<p class="error">${data.error}</p>`;
+      } else if(data.movies) {
+        let html = `<h2>Top 100 Filmes`;
+        if(data.genre) {
+          html += ` - Gênero: "${data.genre}"`;
+        }
+        html += `</h2>`;
+        html += `<table>
+                    <tr>
+                      <th>Nome do Filme</th>
+                      <th>Ano</th>
+                      <th>Diretor</th>
+                      <th>Gêneros</th>
+                      <th>Nota IMDb</th>
+                    </tr>`;
+        data.movies.forEach(movie => {
+          html += `<tr>
+                     <td>${movie.movie_title}</td>
+                     <td>${movie.title_year}</td>
+                     <td>${movie.director_name}</td>
+                     <td>${movie.genres}</td>
+                     <td>${movie.imdb_score}</td>
+                   </tr>`;
+        });
+        html += "</table>";
+        resultDiv.innerHTML = html;
+      } else if(data.message) {
+        resultDiv.innerHTML = `<p>${data.message}</p>`;
+      }
+    }
+  </script>
+</body>
+</html>

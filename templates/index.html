@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Busca de Filmes Semelhantes</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    table, th, td { border: 1px solid #aaa; }
+    th, td { padding: 8px; text-align: left; }
+    tr:nth-child(even) { background-color: #f2f2f2; }
+    .error { color: red; }
+    a { text-decoration: none; color: blue; }
+  </style>
+</head>
+<body>
+  <h1>Busca de Filmes Semelhantes</h1>
+  <!-- Link para a página do Top 100 -->
+  <p><a href="/top100">Ver Top 100 Filmes</a></p>
+  <form id="movieForm">
+    <label for="movieInput">Digite o nome do filme:</label>
+    <input type="text" id="movieInput" name="movie" required>
+    <br><br>
+    <label for="orderSelect">Ordenar por:</label>
+    <select id="orderSelect" name="order">
+      <option value="imdb">Nota IMDb</option>
+      <option value="year">Ano de Lançamento</option>
+    </select>
+    <br><br>
+    <button type="submit">Buscar</button>
+  </form>
+  
+  <div id="result"></div>
+
+  <script>
+    const form = document.getElementById('movieForm');
+    const resultDiv = document.getElementById('result');
+
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      const movie = document.getElementById('movieInput').value;
+      const order = document.getElementById('orderSelect').value;
+      fetch(`/api/search?movie=${encodeURIComponent(movie)}&order=${encodeURIComponent(order)}`)
+        .then(response => response.json())
+        .then(data => {
+          displayResult(data, movie);
+        })
+        .catch(err => {
+          console.error(err);
+          resultDiv.innerHTML = "<p class='error'>Ocorreu um erro ao buscar o filme.</p>";
+        });
+    });
+
+    function displayResult(data, movieInput) {
+      resultDiv.innerHTML = "";
+      if(data.error) {
+        resultDiv.innerHTML = `<p class="error">${data.error}</p>`;
+      } else if(data.candidates) {
+        let html = "<p>Filme não encontrado exatamente. Selecione uma das opções:</p><ul>";
+        data.candidates.forEach(candidate => {
+          html += `<li>
+                    <a href="#" onclick="selectCandidate('${movieInput}', ${candidate.id}); return false;">
+                      ${candidate.movie_title} (${candidate.title_year})
+                    </a>
+                   </li>`;
+        });
+        html += "</ul>";
+        resultDiv.innerHTML = html;
+      } else if(data.similar_movies) {
+        let html = `<h2>Filmes semelhantes ao "${data.selected_movie}" (Cluster: ${data.cluster})</h2>`;
+        html += `<table>
+                    <tr>
+                      <th>Nome do Filme</th>
+                      <th>Ano</th>
+                      <th>Diretor</th>
+                      <th>Gêneros</th>
+                      <th>Nota IMDb</th>
+                    </tr>`;
+        data.similar_movies.forEach(movie => {
+          html += `<tr>
+                     <td>${movie.movie_title}</td>
+                     <td>${movie.title_year}</td>
+                     <td>${movie.director_name}</td>
+                     <td>${movie.genres}</td>
+                     <td>${movie.imdb_score}</td>
+                   </tr>`;
+        });
+        html += "</table>";
+        resultDiv.innerHTML = html;
+      } else if(data.message) {
+        resultDiv.innerHTML = `<p>${data.message}</p>`;
+      }
+    }
+
+    function selectCandidate(movieInput, candidateId) {
+      const order = document.getElementById('orderSelect').value;
+      fetch(`/api/search?movie=${encodeURIComponent(movieInput)}&selection=${candidateId}&order=${encodeURIComponent(order)}`)
+        .then(response => response.json())
+        .then(data => {
+          displayResult(data, movieInput);
+        })
+        .catch(err => {
+          console.error(err);
+          resultDiv.innerHTML = "<p class='error'>Ocorreu um erro ao buscar o filme.</p>";
+        });
+    }
+  </script>
+</body>
+</html>
