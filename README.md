@@ -1,4 +1,4 @@
-# Sistema de Busca de Filmes e Top 100
+# Sistema de Busca de Filmes Similares e Top 100 IMDB
 
 Este projeto é uma aplicação web desenvolvida em Python com Flask que permite:
 
