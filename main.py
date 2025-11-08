@@ -1,3 +1,26 @@
+"""Movies Clustering & Exploration Application
+
+Este módulo inicializa uma aplicação Flask que:
+    - Carrega e pré-processa um dataset de filmes (`movie_metadata.csv`).
+    - Executa clustering (K-Means) em features numéricas para agrupar filmes semelhantes.
+    - Fornece rotas de API para busca de filmes similares e listagem de Top 100.
+    - Expõe páginas HTML simples para interação.
+
+Principais etapas:
+    1. Carregamento do dataset.
+    2. Tratamento de valores ausentes nas features numéricas (preenchimento por mediana).
+    3. Normalização via `StandardScaler`.
+    4. Clustering K-Means (n_clusters=10) e atribuição de rótulos.
+
+Rotas principais:
+    - `/api/search`: Busca um filme e retorna títulos similares (mesmo cluster, score >= 7.5).
+    - `/api/top100`: Lista Top 100 por score ou ano, com filtro opcional de gênero.
+
+Observações:
+    - Ajustes como número de clusters e limiar de score podem ser parametrizados futuramente.
+    - O arquivo README contém detalhes adicionais de uso.
+"""
+
 from flask import Flask, request, jsonify, render_template
 import pandas as pd
 import re
@@ -7,17 +30,20 @@ from sklearn.preprocessing import StandardScaler
 app = Flask(__name__)
 
 # --- Carregamento e pré-processamento do dataset ---
+# Lê o CSV principal. Espera colunas como movie_title, duration, budget, imdb_score, title_year, gross, director_name, genres.
 df = pd.read_csv("movie_metadata.csv")
 
-# Preencher valores ausentes para as features numéricas usadas no clustering
+# Features numéricas que alimentam o clustering.
 numeric_features = ['duration', 'budget', 'imdb_score', 'title_year', 'gross']
+
+# Preenche valores ausentes nessas features usando a mediana (robusto a outliers).
 df[numeric_features] = df[numeric_features].fillna(df[numeric_features].median())
 
-# Normaliza os dados
+# Normalização (z-score) para evitar que escalas diferentes distorçam o K-Means.
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(df[numeric_features])
 
-# Aplica o K-Means (neste exemplo, 10 clusters)
+# Execução do K-Means. n_clusters fixo (10) para simplicidade. random_state garante reprodutibilidade.
 kmeans = KMeans(n_clusters=10, random_state=42)
 df['cluster'] = kmeans.fit_predict(X_scaled)
 
@@ -25,15 +51,47 @@ df['cluster'] = kmeans.fit_predict(X_scaled)
 
 @app.route('/')
 def index():
+    """Renderiza a página inicial (`index.html`).
+
+    Retorna:
+        HTML: Página com interface de busca de filmes.
+    """
     return render_template('index.html')
 
 @app.route('/api/search', methods=['GET'])
 def search_movie():
-    """
-    Parâmetros esperados:
-      - movie: nome do filme pesquisado (obrigatório)
-      - selection: (opcional) índice do candidato selecionado (caso a pesquisa inicial não retorne correspondência exata)
-      - order: (opcional) 'imdb' para ordenar por nota (padrão) ou 'year' para ordenar por ano de lançamento (não afeta a listagem do clustering)
+    """Busca um filme e retorna similares do mesmo cluster.
+
+    Lógica:
+        1. Tenta match exato pelo título normalizado.
+        2. Se não encontrar, retorna candidatos que contenham o termo (substring case-insensitive).
+        3. Se o usuário envia `selection` escolhe um candidato específico.
+        4. Obtém o cluster do filme selecionado e lista filmes com `imdb_score >= 7.5` naquele cluster.
+        5. Ordena por score (padrão) ou ano se `order=year`.
+
+    Parâmetros (query string):
+        movie (str, obrigatório): título pesquisado.
+        selection (int, opcional): índice de um candidato retornado previamente.
+        order (str, opcional): 'imdb' (default) ou 'year'.
+
+    Retornos:
+        200 JSON:
+            - Caso similares: {
+                    "selected_movie": str,
+                    "cluster": int,
+                    "order": str,
+                    "similar_movies": [ {movie_title, title_year, director_name, genres, imdb_score}, ... ]
+                }
+            - Caso candidatos: {
+                    "message": str,
+                    "candidates": [ {id, movie_title, title_year}, ... ]
+                }
+        400 JSON: {"error": mensagem}
+
+    Exemplos:
+        /api/search?movie=Inception
+        /api/search?movie=Inception&order=year
+        /api/search?movie=Matrix&selection=123
     """
     movie_input = request.args.get('movie', '').strip()
     selection = request.args.get('selection', None)
@@ -78,9 +136,10 @@ def search_movie():
         else:
             filme_selecionado = exact_match.iloc[[0]]
 
+    # Cluster do filme base usado para obter similares.
     cluster_id = filme_selecionado.iloc[0]['cluster']
 
-    # Filtra filmes do mesmo cluster com imdb_score >= 7.5, incluindo o próprio filme pesquisado
+    # Filtra filmes do mesmo cluster com imdb_score >= 7.5 (limiar simples de qualidade).
     filmes_semelhantes = df[
         (df['cluster'] == cluster_id) &
         (df['imdb_score'] >= 7.5)
@@ -92,6 +151,7 @@ def search_movie():
     else:
         filmes_semelhantes = filmes_semelhantes.sort_values(by="imdb_score", ascending=False)
 
+    # Monta payload de similares.
     similares = []
     for _, row in filmes_semelhantes.iterrows():
         similares.append({
@@ -110,35 +170,60 @@ def search_movie():
     }
     return jsonify(response)
 
-# Rota para o template que exibe o Top 100
 @app.route('/top100')
 def top100_page():
+    """Renderiza a página `top100.html` que consome o endpoint /api/top100.
+
+    Retorna:
+        HTML: Página de listagem dos Top 100 filmes segundo critérios escolhidos.
+    """
     return render_template('top100.html')
 
 @app.route('/api/top100', methods=['GET'])
 def top100_api():
-    """
-    Parâmetros:
-      - order: 'score' (padrão) para ordenar por score IMDb ou 'year' para ordenar por ano de lançamento;
-      - genre: (opcional) string para filtrar filmes cujo campo "genres" contenha o termo informado.
+    """Retorna lista de Top 100 filmes.
+
+    Processo:
+        1. Aplica filtro de gênero (substring case-insensitive) se fornecido.
+        2. Seleciona inicialmente top 100 por `imdb_score`.
+        3. Reordena por ano se `order=year`, caso contrário mantém por score.
+
+    Parâmetros (query string):
+        order (str, opcional): 'score' (default) ou 'year'.
+        genre (str, opcional): termo para filtro em `genres`.
+
+    Retorno (200 JSON): {
+            "order": str,
+            "genre": str,
+            "movies": [ {movie_title, title_year, director_name, genres, imdb_score}, ... ]
+    }
+
+    Erros:
+        - Atualmente não há erros explícitos além de retorno vazio se filtro restringir demais.
+
+    Exemplos:
+        /api/top100
+        /api/top100?order=year
+        /api/top100?genre=Drama&order=score
     """
     genre = request.args.get('genre', '').strip()
     order = request.args.get('order', 'score').lower()
 
-    # Se um filtro por gênero for informado, aplica-o (busca substring, case-insensitive)
+    # Filtro de gênero (substring case-insensitive). Evita NaN com na=False.
     filtered_df = df.copy()
     if genre:
         filtered_df = filtered_df[filtered_df['genres'].str.contains(genre, case=False, na=False)]
     
-    # Seleciona os top 100 filmes por imdb_score (do maior para o menor)
+    # Seleciona os top 100 filmes por imdb_score (maior -> menor).
     top_df = filtered_df.sort_values(by='imdb_score', ascending=False).head(100)
     
-    # Se o usuário optar por ordenar por ano, reordena os top 100 por title_year
+    # Reordena por ano de lançamento se solicitado.
     if order == 'year':
         top_df = top_df.sort_values(by='title_year', ascending=False)
     else:
         top_df = top_df.sort_values(by='imdb_score', ascending=False)
 
+    # Constrói lista de filmes (padroniza campos e trata ausentes).
     movies = []
     for _, row in top_df.iterrows():
         movies.append({
